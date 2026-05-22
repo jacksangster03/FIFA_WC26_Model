@@ -314,6 +314,10 @@ def run_form_processing(seeded_ratings: dict[str, float]) -> dict[str, float]:
     # 4. Source-driven blend
     ratings, details_df = blend_all_sources(all_teams, form_lookup)
 
+    # 4b. Apply capped manual adjustments (safe to skip if file absent)
+    from src.ratings import apply_manual_adjustments
+    ratings, details_df = apply_manual_adjustments(ratings, details_df)
+
     # 5. Merge in form detail columns for the output CSV
     form_index = form_df.set_index("team")
     extra_cols = ["matches_used", "latest_match_date", "last_5_points_per_game",

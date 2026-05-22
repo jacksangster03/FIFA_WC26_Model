@@ -7,6 +7,7 @@ Writes a human-readable report to outputs/submission_quality_checks.txt.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import pandas as pd
@@ -149,47 +150,75 @@ def check_knockout_predictions(df: pd.DataFrame) -> tuple[list, list]:
 # Realism diagnostics
 # ---------------------------------------------------------------------------
 
+def _scoreline_count(df: pd.DataFrame, h: int, a: int) -> int:
+    """Count matches with this exact scoreline (or its mirror)."""
+    exact  = ((df["predicted_home_goals"] == h) & (df["predicted_away_goals"] == a)).sum()
+    mirror = ((df["predicted_home_goals"] == a) & (df["predicted_away_goals"] == h)).sum() if h != a else 0
+    return int(exact + mirror)
+
+
 def realism_diagnostics(
     group_df: pd.DataFrame,
     knockout_df: pd.DataFrame,
     full_ko_df: Optional[pd.DataFrame] = None,
+    ratings: Optional[dict] = None,
 ) -> list[str]:
     """
-    Computes descriptive statistics for human review.
-    Returns a list of formatted lines.
+    Extended realism diagnostics with scoreline distribution, elite-favourite
+    win rate, corners/cards distribution, and red-card breakdown.
     """
-    lines = []
+    lines    = []
+    warnings = []
 
-    # Group stage
+    # ---- Group stage overview -------------------------------------------
     total_g     = len(group_df)
     draws_g     = (group_df["winning_team"] == "draw").sum()
     home_wins_g = (group_df["winning_team"] == "home").sum()
     away_wins_g = (group_df["winning_team"] == "away").sum()
     total_goals_g = (group_df["predicted_home_goals"] + group_df["predicted_away_goals"]).sum()
     avg_goals_g   = total_goals_g / total_g if total_g else 0
-    zero_zero_g   = ((group_df["predicted_home_goals"] == 0) &
-                     (group_df["predicted_away_goals"] == 0)).sum()
-    one_zero_g    = (((group_df["predicted_home_goals"] == 1) &
-                      (group_df["predicted_away_goals"] == 0)) |
-                     ((group_df["predicted_home_goals"] == 0) &
-                      (group_df["predicted_away_goals"] == 1))).sum()
 
     lines.append("GROUP STAGE REALISM")
     lines.append(f"  Matches:          {total_g}")
     lines.append(f"  Home wins:        {home_wins_g}  ({home_wins_g/total_g*100:.1f}%)")
-    lines.append(f"  Draws:            {draws_g}  ({draws_g/total_g*100:.1f}%)  "
-                 f"[realistic target: 18-25]")
+    lines.append(f"  Draws:            {draws_g}  ({draws_g/total_g*100:.1f}%)  [target: 18-25]")
     lines.append(f"  Away wins:        {away_wins_g}  ({away_wins_g/total_g*100:.1f}%)")
     lines.append(f"  Total goals:      {total_goals_g}")
     lines.append(f"  Avg goals/match:  {avg_goals_g:.2f}  [historical WC avg ~2.6]")
-    lines.append(f"  0-0 scorelines:   {zero_zero_g}")
-    lines.append(f"  1-0 or 0-1:       {one_zero_g}")
 
-    # Knockout
-    total_ko    = len(knockout_df)
-    pens        = knockout_df["penalties"].sum() if "penalties" in knockout_df.columns else 0
-    total_goals_ko = (knockout_df["predicted_home_goals"] +
-                      knockout_df["predicted_away_goals"]).sum()
+    # ---- Scoreline distribution ------------------------------------------
+    lines.append("\n  SCORELINE DISTRIBUTION (group)")
+    for label, (h, a) in [
+        ("0-0",     (0, 0)), ("1-1",     (1, 1)), ("2-2",     (2, 2)),
+        ("1-0/0-1", (1, 0)), ("2-0/0-2", (2, 0)), ("2-1/1-2", (2, 1)),
+        ("3-0/0-3", (3, 0)), ("3-1/1-3", (3, 1)),
+    ]:
+        cnt = _scoreline_count(group_df, h, a)
+        lines.append(f"    {label:<10}: {cnt}")
+
+    # ---- Elite-favourite diagnostics ------------------------------------
+    if ratings is not None and "home_team" in group_df.columns:
+        lines.append("\n  ELITE FAVOURITE WIN RATE")
+        elites, wins = 0, 0
+        for _, row in group_df.iterrows():
+            hr = ratings.get(row["home_team"], 55.0)
+            ar = ratings.get(row["away_team"], 55.0)
+            gap = abs(hr - ar)
+            if gap >= 15:
+                elites += 1
+                fav_side = "home" if hr > ar else "away"
+                if row["winning_team"] == fav_side:
+                    wins += 1
+        pct = wins / elites * 100 if elites else 0.0
+        lines.append(f"    Elite matches (gap>=15): {elites}")
+        lines.append(f"    Favourite wins:          {wins}  ({pct:.0f}%)")
+        if elites > 0 and pct < 75:
+            warnings.append(f"  WARN  Elite favourite win rate {pct:.0f}% < 75% target")
+
+    # ---- Knockout overview ----------------------------------------------
+    total_ko = len(knockout_df)
+    pens     = int(knockout_df["penalties"].sum()) if "penalties" in knockout_df.columns else 0
+    total_goals_ko = (knockout_df["predicted_home_goals"] + knockout_df["predicted_away_goals"]).sum()
     avg_goals_ko   = total_goals_ko / total_ko if total_ko else 0
 
     lines.append("\nKNOCKOUT STAGE REALISM")
@@ -197,7 +226,7 @@ def realism_diagnostics(
     lines.append(f"  Avg goals/match:       {avg_goals_ko:.2f}  [historical KO avg ~2.3]")
     lines.append(f"  Penalty matches:       {pens}")
 
-    # R32 unique team count
+    # ---- R32 integrity --------------------------------------------------
     if full_ko_df is not None:
         r32 = full_ko_df[full_ko_df["round"] == "Round of 32"]
         if not r32.empty:
@@ -213,6 +242,79 @@ def realism_diagnostics(
                          f"[expected 32 - placeholders = {32 - placeholder_count}]")
             dup_ok = unique_real == len(real_teams)
             lines.append(f"  No duplicates:        {'YES' if dup_ok else 'NO (check Best 3rd assignment)'}")
+
+    # ---- Combined corners diagnostics -----------------------------------
+    all_df = pd.concat([group_df, knockout_df], ignore_index=True) if not knockout_df.empty else group_df
+    if "corners" in all_df.columns:
+        lines.append("\nCORNERS DIAGNOSTICS")
+        g_corners  = group_df["corners"].mean()    if "corners" in group_df.columns else float("nan")
+        ko_corners = knockout_df["corners"].mean() if "corners" in knockout_df.columns and total_ko > 0 else float("nan")
+        in_range   = all_df["corners"].between(7, 12).sum()
+        too_low    = (all_df["corners"] < 6).sum()
+        too_high   = (all_df["corners"] > 14).sum()
+        pct_range  = in_range / len(all_df) * 100 if len(all_df) > 0 else 0
+
+        lines.append(f"  Avg group corners:    {g_corners:.2f}")
+        lines.append(f"  Avg KO corners:       {ko_corners:.2f}")
+        lines.append(f"  In 7-12 range:        {in_range}/{len(all_df)} ({pct_range:.0f}%)")
+        lines.append(f"  Below 6:              {too_low}")
+        lines.append(f"  Above 14:             {too_high}")
+
+        dist = all_df["corners"].value_counts().sort_index()
+        lines.append("  Distribution:         " + "  ".join(f"{v}={cnt}" for v, cnt in dist.items()))
+
+        if not math.isnan(g_corners) and not (7 <= g_corners <= 12):
+            warnings.append(f"  WARN  Avg group corners {g_corners:.2f} outside 7-12 target")
+        if pct_range < 70:
+            warnings.append(f"  WARN  Only {pct_range:.0f}% of matches have corners 7-12 (target >=70%)")
+
+    # ---- Yellow cards diagnostics ---------------------------------------
+    if "yellow_cards" in all_df.columns:
+        lines.append("\nYELLOW CARDS DIAGNOSTICS")
+        g_yel  = group_df["yellow_cards"].mean()    if "yellow_cards" in group_df.columns else float("nan")
+        ko_yel = knockout_df["yellow_cards"].mean() if "yellow_cards" in knockout_df.columns and total_ko > 0 else float("nan")
+        in_yrange  = all_df["yellow_cards"].between(2, 6).sum()
+        too_few    = (all_df["yellow_cards"] < 1).sum()
+        too_many   = (all_df["yellow_cards"] > 8).sum()
+        pct_yrange = in_yrange / len(all_df) * 100 if len(all_df) > 0 else 0
+
+        lines.append(f"  Avg group yellows:    {g_yel:.2f}")
+        lines.append(f"  Avg KO yellows:       {ko_yel:.2f}")
+        lines.append(f"  In 2-6 range:         {in_yrange}/{len(all_df)} ({pct_yrange:.0f}%)")
+        lines.append(f"  Below 1:              {too_few}")
+        lines.append(f"  Above 8:              {too_many}")
+
+        ydist = all_df["yellow_cards"].value_counts().sort_index()
+        lines.append("  Distribution:         " + "  ".join(f"{v}={cnt}" for v, cnt in ydist.items()))
+
+        if not math.isnan(g_yel) and not (2 <= g_yel <= 6):
+            warnings.append(f"  WARN  Avg group yellow cards {g_yel:.2f} outside 2-6 target")
+        if pct_yrange < 70:
+            warnings.append(f"  WARN  Only {pct_yrange:.0f}% of matches have yellows 2-6 (target >=70%)")
+
+    # ---- Red cards diagnostics ------------------------------------------
+    if "red_cards" in all_df.columns:
+        total_reds  = int(all_df["red_cards"].sum())
+        group_reds  = int(group_df["red_cards"].sum())   if "red_cards" in group_df.columns else 0
+        ko_reds     = int(knockout_df["red_cards"].sum()) if "red_cards" in knockout_df.columns else 0
+        multi_reds  = int((all_df["red_cards"] > 1).sum())
+
+        lines.append("\nRED CARDS DIAGNOSTICS")
+        lines.append(f"  Total red cards:      {total_reds}")
+        lines.append(f"  Group stage reds:     {group_reds}")
+        lines.append(f"  Knockout reds:        {ko_reds}")
+        lines.append(f"  Matches with >1 red:  {multi_reds}")
+
+        if total_reds > 4:
+            warnings.append(f"  WARN  Total red cards {total_reds} exceeds target of 0-4")
+        if multi_reds > 0:
+            warnings.append(f"  WARN  {multi_reds} match(es) have >1 red card")
+        if group_reds > 2:
+            warnings.append(f"  WARN  Group stage has {group_reds} red cards (target <=2)")
+
+    if warnings:
+        lines.append("\nDIAGNOSTIC WARNINGS")
+        lines.extend(warnings)
 
     return lines
 
@@ -374,7 +476,7 @@ def run_all_checks(
     ds_errors, ds_warnings = check_data_sources()
     ph_errors, ph_warnings = check_placeholder_leakage(group_preds, group_tables, knockout_preds)
     rs_errors, rs_warnings = check_rating_sanity(ratings)
-    diag_lines             = realism_diagnostics(group_preds, knockout_preds, full_ko_preds)
+    diag_lines             = realism_diagnostics(group_preds, knockout_preds, full_ko_preds, ratings)
 
     all_errors = g_errors + k_errors + ph_errors
 

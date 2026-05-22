@@ -2,15 +2,22 @@
 Team strength rating system.
 
 Source-driven blend (target weights):
-  FIFA points (normalised)    35%
-  World Elo (normalised)      25%
-  Recency-weighted form       15%
-  Tournament pedigree         10%
+  FIFA points (normalised)    30%
+  World Elo (normalised)      30%
+  Recency-weighted form       20%
+  Tournament pedigree          5%
   Seeded/manual fallback      10%
   Host advantage               5%
 
+Pedigree reduced to 5% so modern squad strength (FIFA, Elo, form) drives
+ratings for currently strong teams like Spain, England and Portugal without
+historical WC titles unfairly inflating Brazil/Germany above them.
+
 When a source is unavailable for a team, its weight is redistributed
 proportionally among available sources (excluding host, which is binary).
+
+A capped manual adjustment layer (data/external/team_adjustments.csv) is
+applied after the blend; cap is ±2.5 rating points.
 """
 
 from __future__ import annotations
@@ -89,13 +96,16 @@ SEEDED_RATINGS: dict[str, float] = {
 
 # Target weights
 _W = {
-    "fifa":     0.35,
-    "elo":      0.25,
-    "form":     0.15,
-    "pedigree": 0.10,
+    "fifa":     0.30,
+    "elo":      0.30,
+    "form":     0.20,
+    "pedigree": 0.05,
     "seeded":   0.10,
     "host":     0.05,
 }
+
+# Cap on manual adjustments (rating points)
+MANUAL_ADJ_CAP = 2.5
 
 
 def _load_csv_col(path, team_col: str, val_col: str) -> dict[str, float]:
@@ -237,6 +247,62 @@ def blend_all_sources(
 
     details_df = pd.DataFrame(rows).sort_values("final_rating", ascending=False).reset_index(drop=True)
     return ratings, details_df
+
+
+def apply_manual_adjustments(
+    ratings: dict[str, float],
+    details_df: pd.DataFrame,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """
+    Loads data/external/team_adjustments.csv and applies capped adjustments.
+    Adds manual_adjustment and manual_adjustment_reason columns to details_df.
+    Pipeline continues normally if the file is absent.
+    """
+    from src.config import EXTERNAL_DIR
+    adj_path = EXTERNAL_DIR / "team_adjustments.csv"
+
+    adj_map: dict[str, float]  = {}
+    reason_map: dict[str, str] = {}
+
+    if adj_path.exists():
+        try:
+            adj_df = pd.read_csv(adj_path)
+            if "team" in adj_df.columns and "adjustment" in adj_df.columns:
+                for _, row in adj_df.iterrows():
+                    team = str(row["team"])
+                    raw  = float(row["adjustment"])
+                    capped = float(np.clip(raw, -MANUAL_ADJ_CAP, MANUAL_ADJ_CAP))
+                    adj_map[team]    = capped
+                    reason_map[team] = str(row.get("reason", "")) if pd.notna(row.get("reason")) else ""
+                print(f"[ratings] Applied manual adjustments for "
+                      f"{sum(1 for v in adj_map.values() if v != 0)} teams")
+        except Exception as exc:
+            print(f"[ratings] WARN: could not load team_adjustments.csv: {exc}")
+
+    # Apply to ratings dict
+    updated = {}
+    for team, rating in ratings.items():
+        adj = adj_map.get(team, 0.0)
+        updated[team] = float(np.clip(rating + adj, 0.0, 100.0))
+
+    # Add columns to details_df
+    details_df = details_df.copy()
+    details_df["manual_adjustment"]        = details_df["team"].map(lambda t: adj_map.get(t, 0.0))
+    details_df["manual_adjustment_reason"] = details_df["team"].map(lambda t: reason_map.get(t, ""))
+
+    # Update final_rating column and rating_explanation
+    details_df["final_rating"] = details_df["team"].map(lambda t: round(updated.get(t, ratings.get(t, 0.0)), 2))
+    def _update_expl(row):
+        expl = str(row["rating_explanation"])
+        adj  = row["manual_adjustment"]
+        if adj != 0.0:
+            expl = expl + f" | manual{'+' if adj > 0 else ''}{adj:.1f}"
+        return expl
+    details_df["rating_explanation"] = details_df.apply(_update_expl, axis=1)
+
+    # Re-sort by updated final_rating
+    details_df = details_df.sort_values("final_rating", ascending=False).reset_index(drop=True)
+    return updated, details_df
 
 
 def _load_form_adjusted_ratings() -> Optional[dict[str, float]]:

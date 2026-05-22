@@ -126,7 +126,7 @@ def simulate_knockout_bracket(
             home_team, away_team, ratings, rnd, venue, mode="deterministic"
         )
         winner, penalties = knockout_winner(
-            home_team, away_team, hg, ag, ratings
+            home_team, away_team, hg, ag, ratings, stage=rnd
         )
         loser = away_team if winner == "home" else home_team
 

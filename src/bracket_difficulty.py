@@ -23,22 +23,12 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.config import OUTPUTS_DIR
+from src.config import OUTPUTS_DIR, KNOCKOUT_PROBABILITY_SCALES
 from src.goal_model import expected_goals
 
 # ---------------------------------------------------------------------------
 # Stage-scaled logistic win probability
 # ---------------------------------------------------------------------------
-
-_KO_SCALE: dict[str, float] = {
-    "Round of 32":         15.5,
-    "Round of 16":         16.5,
-    "Quarter-final":       18.0,
-    "Semi-final":          19.0,
-    "Third-place playoff": 18.0,
-    "Final":               20.0,
-}
-
 
 def knockout_win_probability(rating_a: float, rating_b: float, stage: str) -> float:
     """
@@ -55,7 +45,7 @@ def knockout_win_probability(rating_a: float, rating_b: float, stage: str) -> fl
       15-pt gap -> ~68-72%
     """
     diff  = rating_a - rating_b
-    scale = _KO_SCALE.get(stage, 17.0)
+    scale = KNOCKOUT_PROBABILITY_SCALES.get(stage, 17.0)
     p     = 1.0 / (1.0 + math.exp(-diff / scale))
     return float(np.clip(p, 0.20, 0.80))
 
@@ -87,6 +77,7 @@ def generate_bracket_diagnostics(
 
         p_home = knockout_win_probability(hr, ar, rnd)
         p_away = 1.0 - p_home
+        det_pen_winner = "home" if p_home >= 0.5 else "away"
 
         winner_side = str(row.get("match_winner", ""))
         winner = home if winner_side == "home" else away
@@ -96,6 +87,11 @@ def generate_bracket_diagnostics(
         hg   = row.get("predicted_home_goals", "")
         ag   = row.get("predicted_away_goals", "")
 
+        stage_draw_risk = (
+            "high" if abs(diff) <= 3 else
+            "medium" if abs(diff) <= 8 else
+            "low"
+        )
         note_parts = []
         if abs(diff) < 3:
             note_parts.append("coinflip")
@@ -114,11 +110,19 @@ def generate_bracket_diagnostics(
             "rating_diff":         round(diff, 2),
             "home_win_prob_model": round(p_home, 3),
             "away_win_prob_model": round(p_away, 3),
+            "home_penalty_win_prob": round(p_home, 3),
+            "away_penalty_win_prob": round(p_away, 3),
             "predicted_score":     f"{hg}-{ag}",
             "winner":              winner,
             "loser":               loser,
             "penalties":           pens,
-            "path_note":           "; ".join(note_parts) if note_parts else "normal",
+            "deterministic_penalty_winner": det_pen_winner if pens else "",
+            "deterministic_winner_consistent_with_prob": (
+                (winner_side == "home" and p_home >= 0.5) or
+                (winner_side == "away" and p_home <= 0.5)
+            ),
+            "stage_draw_risk":     stage_draw_risk,
+            "path_difficulty_note": "; ".join(note_parts) if note_parts else "normal",
         })
 
     df = pd.DataFrame(rows)

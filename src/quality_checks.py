@@ -11,6 +11,7 @@ import math
 from typing import Optional
 
 import pandas as pd
+from src.bracket_difficulty import knockout_win_probability
 
 from src.config import (
     EXPECTED_GROUP_ROWS,
@@ -243,74 +244,65 @@ def realism_diagnostics(
             dup_ok = unique_real == len(real_teams)
             lines.append(f"  No duplicates:        {'YES' if dup_ok else 'NO (check Best 3rd assignment)'}")
 
-    # ---- Combined corners diagnostics -----------------------------------
+    # ---- Cards and corners diagnostics -----------------------------------
     all_df = pd.concat([group_df, knockout_df], ignore_index=True) if not knockout_df.empty else group_df
+    lines.append("\nCARDS AND CORNERS DIAGNOSTICS")
     if "corners" in all_df.columns:
-        lines.append("\nCORNERS DIAGNOSTICS")
-        g_corners  = group_df["corners"].mean()    if "corners" in group_df.columns else float("nan")
-        ko_corners = knockout_df["corners"].mean() if "corners" in knockout_df.columns and total_ko > 0 else float("nan")
-        in_range   = all_df["corners"].between(7, 12).sum()
-        too_low    = (all_df["corners"] < 6).sum()
-        too_high   = (all_df["corners"] > 14).sum()
-        pct_range  = in_range / len(all_df) * 100 if len(all_df) > 0 else 0
+        avg_corners = float(all_df["corners"].mean())
+        g_corners   = float(group_df["corners"].mean()) if "corners" in group_df.columns else float("nan")
+        ko_corners  = float(knockout_df["corners"].mean()) if "corners" in knockout_df.columns and total_ko > 0 else float("nan")
+        min_corners = int(all_df["corners"].min())
+        max_corners = int(all_df["corners"].max())
+        cdist = all_df["corners"].value_counts().sort_index()
+        c_mode_val = int(cdist.idxmax())
+        c_mode_cnt = int(cdist.max())
+        c_mode_pct = (c_mode_cnt / len(all_df) * 100) if len(all_df) > 0 else 0.0
+        lines.append(f"  Avg corners overall:  {avg_corners:.2f}")
+        lines.append(f"  Avg corners group:    {g_corners:.2f}")
+        lines.append(f"  Avg corners knockout: {ko_corners:.2f}")
+        lines.append(f"  Min/Max corners:      {min_corners}/{max_corners}")
+        lines.append("  Corners distribution: " + "  ".join(f"{v}={cnt}" for v, cnt in cdist.items()))
+        lines.append(f"  Most common corners:  {c_mode_val} ({c_mode_cnt}/{len(all_df)}, {c_mode_pct:.1f}%)")
+        if c_mode_pct > 35:
+            warnings.append(
+                f"  WARN  Corner value {c_mode_val} appears in {c_mode_pct:.1f}% of matches (>35%)"
+            )
 
-        lines.append(f"  Avg group corners:    {g_corners:.2f}")
-        lines.append(f"  Avg KO corners:       {ko_corners:.2f}")
-        lines.append(f"  In 7-12 range:        {in_range}/{len(all_df)} ({pct_range:.0f}%)")
-        lines.append(f"  Below 6:              {too_low}")
-        lines.append(f"  Above 14:             {too_high}")
-
-        dist = all_df["corners"].value_counts().sort_index()
-        lines.append("  Distribution:         " + "  ".join(f"{v}={cnt}" for v, cnt in dist.items()))
-
-        if not math.isnan(g_corners) and not (7 <= g_corners <= 12):
-            warnings.append(f"  WARN  Avg group corners {g_corners:.2f} outside 7-12 target")
-        if pct_range < 70:
-            warnings.append(f"  WARN  Only {pct_range:.0f}% of matches have corners 7-12 (target >=70%)")
-
-    # ---- Yellow cards diagnostics ---------------------------------------
     if "yellow_cards" in all_df.columns:
-        lines.append("\nYELLOW CARDS DIAGNOSTICS")
-        g_yel  = group_df["yellow_cards"].mean()    if "yellow_cards" in group_df.columns else float("nan")
-        ko_yel = knockout_df["yellow_cards"].mean() if "yellow_cards" in knockout_df.columns and total_ko > 0 else float("nan")
-        in_yrange  = all_df["yellow_cards"].between(2, 6).sum()
-        too_few    = (all_df["yellow_cards"] < 1).sum()
-        too_many   = (all_df["yellow_cards"] > 8).sum()
-        pct_yrange = in_yrange / len(all_df) * 100 if len(all_df) > 0 else 0
-
-        lines.append(f"  Avg group yellows:    {g_yel:.2f}")
-        lines.append(f"  Avg KO yellows:       {ko_yel:.2f}")
-        lines.append(f"  In 2-6 range:         {in_yrange}/{len(all_df)} ({pct_yrange:.0f}%)")
-        lines.append(f"  Below 1:              {too_few}")
-        lines.append(f"  Above 8:              {too_many}")
-
+        avg_yel = float(all_df["yellow_cards"].mean())
+        g_yel   = float(group_df["yellow_cards"].mean()) if "yellow_cards" in group_df.columns else float("nan")
+        ko_yel  = float(knockout_df["yellow_cards"].mean()) if "yellow_cards" in knockout_df.columns and total_ko > 0 else float("nan")
         ydist = all_df["yellow_cards"].value_counts().sort_index()
-        lines.append("  Distribution:         " + "  ".join(f"{v}={cnt}" for v, cnt in ydist.items()))
+        lines.append(f"  Avg yellows overall:  {avg_yel:.2f}")
+        lines.append(f"  Avg yellows group:    {g_yel:.2f}")
+        lines.append(f"  Avg yellows knockout: {ko_yel:.2f}")
+        lines.append("  Yellow distribution:  " + "  ".join(f"{v}={cnt}" for v, cnt in ydist.items()))
 
-        if not math.isnan(g_yel) and not (2 <= g_yel <= 6):
-            warnings.append(f"  WARN  Avg group yellow cards {g_yel:.2f} outside 2-6 target")
-        if pct_yrange < 70:
-            warnings.append(f"  WARN  Only {pct_yrange:.0f}% of matches have yellows 2-6 (target >=70%)")
-
-    # ---- Red cards diagnostics ------------------------------------------
     if "red_cards" in all_df.columns:
-        total_reds  = int(all_df["red_cards"].sum())
-        group_reds  = int(group_df["red_cards"].sum())   if "red_cards" in group_df.columns else 0
-        ko_reds     = int(knockout_df["red_cards"].sum()) if "red_cards" in knockout_df.columns else 0
-        multi_reds  = int((all_df["red_cards"] > 1).sum())
-
-        lines.append("\nRED CARDS DIAGNOSTICS")
+        total_reds = int(all_df["red_cards"].sum())
+        group_reds = int(group_df["red_cards"].sum()) if "red_cards" in group_df.columns else 0
+        ko_reds = int(knockout_df["red_cards"].sum()) if "red_cards" in knockout_df.columns else 0
         lines.append(f"  Total red cards:      {total_reds}")
-        lines.append(f"  Group stage reds:     {group_reds}")
-        lines.append(f"  Knockout reds:        {ko_reds}")
-        lines.append(f"  Matches with >1 red:  {multi_reds}")
+        lines.append(f"  Red cards by stage:   group={group_reds}, knockout={ko_reds}")
 
-        if total_reds > 4:
-            warnings.append(f"  WARN  Total red cards {total_reds} exceeds target of 0-4")
-        if multi_reds > 0:
-            warnings.append(f"  WARN  {multi_reds} match(es) have >1 red card")
-        if group_reds > 2:
-            warnings.append(f"  WARN  Group stage has {group_reds} red cards (target <=2)")
+    if pens > 12:
+        warnings.append(f"  WARN  Knockout penalties {pens} exceed threshold of 12")
+
+    if ratings is not None and not knockout_df.empty and "round" in knockout_df.columns:
+        final_df = knockout_df[knockout_df["round"] == "Final"]
+        if not final_df.empty:
+            f = final_df.iloc[0]
+            home = str(f["predicted_home_team"])
+            away = str(f["predicted_away_team"])
+            hr = ratings.get(home, 55.0)
+            ar = ratings.get(away, 55.0)
+            p_home = knockout_win_probability(hr, ar, "Final")
+            final_winner_side = str(f.get("match_winner", ""))
+            if (p_home >= 0.5 and final_winner_side != "home") or (p_home < 0.5 and final_winner_side != "away"):
+                warnings.append(
+                    f"  WARN  Deterministic final winner contradicts model win probability "
+                    f"(p_home={p_home:.3f}, winner={final_winner_side})"
+                )
 
     if warnings:
         lines.append("\nDIAGNOSTIC WARNINGS")

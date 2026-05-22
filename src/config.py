@@ -71,7 +71,8 @@ MAX_XG = 3.50
 # Rating-point gap that separates "decisive" matches from draws in
 # deterministic mode.  Teams within this many points predict a draw;
 # beyond it, the higher-rated team is expected to win.
-DRAW_RATING_THRESHOLD = 12.0
+DRAW_RATING_THRESHOLD_GROUP = 12.0
+DRAW_RATING_THRESHOLD_KNOCKOUT = 8.0
 
 # Deterministic scoreline formula biases.
 # WINNER_BIAS is added to the winner's xG before rounding to goals,
@@ -104,6 +105,17 @@ KNOCKOUT_XG_FACTORS = {
 # Minimum rating advantage to deterministically win on penalties.
 # Below this threshold the higher-rated team is still favoured but close.
 PENALTY_DETERMINISTIC_THRESHOLD = 5.0
+
+# Knockout win-probability scale by stage (used by diagnostics and
+# deterministic penalty tie-breaks).
+KNOCKOUT_PROBABILITY_SCALES = {
+    "Round of 32":         15.5,
+    "Round of 16":         16.5,
+    "Quarter-final":       18.0,
+    "Semi-final":          19.0,
+    "Third-place playoff": 18.0,
+    "Final":               20.0,
+}
 
 # ---------------------------------------------------------------------------
 # Cards & corners model parameters

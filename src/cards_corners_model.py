@@ -71,11 +71,11 @@ def _style(team: str) -> dict[str, float]:
 
 def _fingerprint(home_team: str, away_team: str, stage: str, salt: str = "") -> float:
     """
-    Returns a value in [-0.8, +0.8] unique to this match.
-    Uses 17 distinct steps for wider distribution spread.
+    Returns a value in [-1.2, +1.2] unique to this match.
+    Uses 25 distinct steps for wider deterministic spread.
     """
     h = hash((home_team, away_team, stage, salt))
-    return ((h % 17) - 8) * 0.1   # -0.8 … 0 … +0.8  (17 steps)
+    return ((h % 25) - 12) * 0.1   # -1.2 … 0 … +1.2 (25 steps)
 
 
 # ---------------------------------------------------------------------------
@@ -112,45 +112,56 @@ def predict_corners(
     gap    = abs(home_r - away_r)
 
     # Base
-    corners: float = 8.5
+    corners: float = 8.6
 
     # Attacking strength: teams rated above 65 generate more corners on average
-    attack_adj = min(1.0, max(-0.3, (avg_r - 65.0) / 55.0))
+    attack_adj = min(1.2, max(-0.3, (avg_r - 64.0) / 42.0))
     corners += attack_adj
 
     # xG tempo: more attacking intent -> more corners
     total_xg = home_xg + away_xg
-    xg_adj   = (total_xg - 2.7) * 0.5
-    corners += max(-0.5, min(0.8, xg_adj))
+    xg_adj   = (total_xg - 2.6) * 0.7
+    corners += max(-0.7, min(1.0, xg_adj))
 
     # Closeness: close games see both teams push forward
     xg_diff = abs(home_xg - away_xg)
     if xg_diff < 0.2:
-        corners += 0.6
+        corners += 0.7
     elif xg_diff < 0.45:
-        corners += 0.3
+        corners += 0.35
 
     # Mismatch penalty: weak team parks -> fewer set-pieces
     if gap > 28:
-        corners -= 1.0
+        corners -= 0.9
     elif gap > 16:
-        corners -= 0.5
+        corners -= 0.35
+
+    # Underdog chasing effect: when trailing, weaker side drives extra volume.
+    if home_goals != away_goals:
+        weaker_is_trailing = (
+            (home_r < away_r and home_goals < away_goals) or
+            (away_r < home_r and away_goals < home_goals)
+        )
+        if weaker_is_trailing and gap < 24:
+            corners += 0.5
 
     # Knockout caution
-    if stage != "group":
-        corners -= 0.4
+    if stage == "Round of 32":
+        corners -= 0.2
+    elif stage in ("Round of 16", "Quarter-final"):
+        corners -= 0.1
 
     # Team style: set-piece threat and tempo
     hs = _style(home_team)
     as_ = _style(away_team)
-    spt_adj  = ((hs["set_piece_threat"] - 1.0) + (as_["set_piece_threat"] - 1.0)) * 0.20
-    tempo_adj = ((hs["tempo"] - 1.0)           + (as_["tempo"] - 1.0))           * 0.15
+    spt_adj  = ((hs["set_piece_threat"] - 1.0) + (as_["set_piece_threat"] - 1.0)) * 0.30
+    tempo_adj = ((hs["tempo"] - 1.0)           + (as_["tempo"] - 1.0))           * 0.25
     corners += spt_adj + tempo_adj
 
     # Primary match fingerprint for deterministic variation
-    corners += _fingerprint(home_team, away_team, stage, "corners")
+    corners += _fingerprint(home_team, away_team, stage, "corners") * 0.75
     # Secondary fingerprint (different salt) adds finer variation
-    corners += _fingerprint(away_team, home_team, stage, "corners2") * 0.4
+    corners += _fingerprint(away_team, home_team, stage, "corners2") * 0.45
 
     return int(max(6, min(14, round(corners))))
 
@@ -195,7 +206,7 @@ def predict_yellow_cards(
     away_r = ratings.get(away_team, 55.0)
     gap    = abs(home_r - away_r)
 
-    yellows: float = 2.8
+    yellows: float = 3.0
 
     # Stage escalation
     yellows += _STAGE_YELLOW_ADJ.get(stage, 0.0)
@@ -204,7 +215,7 @@ def predict_yellow_cards(
     xg_diff = abs(home_xg - away_xg)
     is_drawn_ko = (home_goals == away_goals and stage != "group")
     if is_drawn_ko:
-        yellows += 0.7    # penalty-pressure draw
+        yellows += 0.8    # penalty-pressure draw
     elif xg_diff < 0.2:
         yellows += 0.55
     elif xg_diff < 0.5:
@@ -212,7 +223,7 @@ def predict_yellow_cards(
 
     # Very close teams: extra friction
     if gap < 5:
-        yellows += 0.2
+        yellows += 0.25
 
     # Large mismatch: fewer yellows unless underdog is defending deep
     # (physicality compensates slightly)
@@ -225,14 +236,18 @@ def predict_yellow_cards(
     # Team style: physicality and discipline risk
     hs  = _style(home_team)
     as_ = _style(away_team)
-    style_adj  = ((hs["physicality"]     - 1.0) + (as_["physicality"]     - 1.0)) * 0.18
-    style_adj += ((hs["discipline_risk"] - 1.0) + (as_["discipline_risk"] - 1.0)) * 0.18
+    style_adj  = ((hs["physicality"]     - 1.0) + (as_["physicality"]     - 1.0)) * 0.26
+    style_adj += ((hs["discipline_risk"] - 1.0) + (as_["discipline_risk"] - 1.0)) * 0.28
     yellows += style_adj
 
+    # Close knockout ties are typically more intense.
+    if stage != "group" and gap < 9 and abs(home_goals - away_goals) <= 1:
+        yellows += 0.35
+
     # Primary match fingerprint
-    yellows += _fingerprint(home_team, away_team, stage, "yellows")
+    yellows += _fingerprint(home_team, away_team, stage, "yellows") * 0.55
     # Secondary fingerprint adds finer spread
-    yellows += _fingerprint(away_team, home_team, stage, "yellows2") * 0.35
+    yellows += _fingerprint(away_team, home_team, stage, "yellows2") * 0.45
 
     return int(max(1, min(8, round(yellows))))
 
@@ -283,7 +298,7 @@ def predict_red_cards(
         home_team, away_team, ratings, stage,
         home_goals, away_goals, home_xg, away_xg,
     )
-    if yellows < 5:
+    if yellows < 6:
         return 0
 
     # Check team friction profile
@@ -294,6 +309,6 @@ def predict_red_cards(
     if max_disc < 1.5 and max_phys < 1.5:
         return 0
 
-    # Deterministic threshold: 1 in 4 qualifying matches gets a red
+    # Deterministic threshold: only a minority of qualifying ties get a red
     h = hash((home_team, away_team, stage, "red"))
-    return 1 if (h % 4 == 0) else 0
+    return 1 if (h % 5 == 0) else 0

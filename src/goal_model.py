@@ -38,7 +38,9 @@ from src.config import (
     MAX_GOALS_GRID,
     WC_CONSERVATISM,
     KNOCKOUT_XG_FACTORS,
-    DRAW_RATING_THRESHOLD,
+    DRAW_RATING_THRESHOLD_GROUP,
+    DRAW_RATING_THRESHOLD_KNOCKOUT,
+    KNOCKOUT_PROBABILITY_SCALES,
     PENALTY_DETERMINISTIC_THRESHOLD,
     WINNER_BIAS,
     LOSER_XG_THRESHOLD,
@@ -148,9 +150,22 @@ def predict_scoreline(
         away_r      = get_rating(away_team, ratings)
         rating_diff = home_r - away_r
 
-        if rating_diff > DRAW_RATING_THRESHOLD:
+        draw_threshold = (
+            DRAW_RATING_THRESHOLD_GROUP if stage == "group"
+            else DRAW_RATING_THRESHOLD_KNOCKOUT
+        )
+
+        if stage != "group" and 5.0 <= abs(rating_diff) < draw_threshold:
+            # In knockout deterministic mode, avoid forcing too many 90-min draws
+            # when there is a meaningful (but not huge) quality edge.
+            avg_rating = (home_r + away_r) / 2.0
+            if not (avg_rating >= 74.0 and abs(rating_diff) < 6.0):
+                outcome = "home" if rating_diff > 0 else "away"
+            else:
+                outcome = "draw"
+        elif rating_diff > draw_threshold:
             outcome = "home"
-        elif rating_diff < -DRAW_RATING_THRESHOLD:
+        elif rating_diff < -draw_threshold:
             outcome = "away"
         else:
             outcome = "draw"
@@ -186,6 +201,7 @@ def knockout_winner(
     home_goals: int,
     away_goals: int,
     ratings: dict[str, float],
+    stage: str = "",
     rng: Optional[np.random.Generator] = None,
 ) -> tuple[str, bool]:
     """
@@ -200,13 +216,20 @@ def knockout_winner(
     away_r = get_rating(away_team, ratings)
     diff   = home_r - away_r
 
-    if abs(diff) >= PENALTY_DETERMINISTIC_THRESHOLD:
-        winner = "home" if diff > 0 else "away"
-    elif rng is not None:
+    if rng is not None:
         total  = home_r + away_r
         p_home = home_r / total if total > 0 else 0.5
         winner = "home" if rng.random() < p_home else "away"
     else:
-        winner = "home" if hash((home_team, away_team)) % 2 == 0 else "away"
+        scale = KNOCKOUT_PROBABILITY_SCALES.get(stage, 17.0)
+        p_home = float(np.clip(1.0 / (1.0 + np.exp(-diff / scale)), 0.20, 0.80))
+        if p_home > 0.5:
+            winner = "home"
+        elif p_home < 0.5:
+            winner = "away"
+        elif abs(diff) >= PENALTY_DETERMINISTIC_THRESHOLD:
+            winner = "home" if diff > 0 else "away"
+        else:
+            winner = "home" if hash((home_team, away_team)) % 2 == 0 else "away"
 
     return winner, True

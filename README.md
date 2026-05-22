@@ -128,7 +128,7 @@ Checks file existence, placeholder leakage, rating component columns, output row
 
 - **Team ratings**: edit `SEEDED_RATINGS` in `src/ratings.py` (used as fallback regularisation)
 - **Rating weights**: edit `_W` in `src/ratings.py`
-- **xG parameters**: edit `BASE_XG`, `DRAW_RATING_THRESHOLD`, `WC_CONSERVATISM` etc. in `src/config.py`
+- **xG parameters**: edit `BASE_XG`, `DRAW_RATING_THRESHOLD_GROUP`, `DRAW_RATING_THRESHOLD_KNOCKOUT`, `WC_CONSERVATISM` etc. in `src/config.py`
 - **Late news**: add rows to `data/manual_overrides.csv`
 - **Playoff results**: edit `data/external/playoff_results.csv`, then `--refresh-data`
 

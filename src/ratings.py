@@ -2,16 +2,18 @@
 Team strength rating system.
 
 Source-driven blend (target weights):
-  FIFA points (normalised)    30%
-  World Elo (normalised)      30%
-  Recency-weighted form       20%
-  Tournament pedigree          5%
-  Seeded/manual fallback      10%
-  Host advantage               5%
+  FIFA points (normalised)      28%
+  World Elo (normalised)        27%
+  Recency-weighted form         15%
+  Market/Opta prior             15%
+  Tournament pedigree            5%
+  Seeded/manual fallback         5%
+  Host advantage                 5%
 
-Pedigree reduced to 5% so modern squad strength (FIFA, Elo, form) drives
-ratings for currently strong teams like Spain, England and Portugal without
-historical WC titles unfairly inflating Brazil/Germany above them.
+Market prior is derived from champion_probability_targets.csv:
+  market_component = clip(45 + 2.2 * target_mid_pct, 40, 90)
+This anchors ratings to betting-market / Opta-model priors, preventing
+individual sources (pedigree, Elo spikes) from over-concentrating the top.
 
 When a source is unavailable for a team, its weight is redistributed
 proportionally among available sources (excluding host, which is binary).
@@ -94,13 +96,14 @@ SEEDED_RATINGS: dict[str, float] = {
 
 }
 
-# Target weights
+# Target weights (must sum to 1.0 including host)
 _W = {
-    "fifa":     0.30,
-    "elo":      0.30,
-    "form":     0.20,
+    "fifa":     0.28,
+    "elo":      0.27,
+    "form":     0.15,
+    "market":   0.15,
     "pedigree": 0.05,
-    "seeded":   0.10,
+    "seeded":   0.05,
     "host":     0.05,
 }
 
@@ -119,6 +122,36 @@ def _load_csv_col(path, team_col: str, val_col: str) -> dict[str, float]:
     except Exception:
         pass
     return {}
+
+
+def load_market_prior() -> dict[str, float]:
+    """
+    Reads champion_probability_targets.csv and converts target_mid_pct to a
+    0-100 strength component via: market_component = clip(45 + 2.2 * mid_pct, 40, 90).
+
+    Example mappings:
+      Spain  15.8% -> 79.8   France 15.5% -> 79.1   Argentina 10.3% -> 67.7
+      England 10.8% -> 68.8  Brazil  8.5% -> 63.7   Portugal   6.8% -> 60.0
+      Germany  6.2% -> 58.6  Netherlands 4.0% -> 53.8
+
+    Returns {} if file is absent (market component treated as missing, weight redistributed).
+    """
+    from src.config import EXTERNAL_DIR
+    path = EXTERNAL_DIR / "champion_probability_targets.csv"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+        if "team" not in df.columns or "target_mid_pct" not in df.columns:
+            return {}
+        result = {}
+        for _, row in df.iterrows():
+            mid = float(row["target_mid_pct"])
+            component = float(np.clip(45.0 + 2.2 * mid, 40.0, 90.0))
+            result[str(row["team"])] = component
+        return result
+    except Exception:
+        return {}
 
 
 def _blend(components: dict[str, Optional[float]],
@@ -189,6 +222,12 @@ def blend_all_sources(
     fifa_scores     = fifa_rankings.load_normalised()
     elo_scores      = world_elo.load_normalised()
     pedigree_scores = tournament_achievements.load_normalised()
+    market_scores   = load_market_prior()
+
+    if market_scores:
+        print(f"[ratings] Market prior loaded for {len(market_scores)} teams")
+    else:
+        print("[ratings] No market prior found; weight redistributed to other sources")
 
     rows = []
     ratings: dict[str, float] = {}
@@ -201,48 +240,40 @@ def blend_all_sources(
             "fifa":     fifa_scores.get(team),
             "elo":      elo_scores.get(team),
             "form":     form_lookup.get(team),
+            "market":   market_scores.get(team),
             "pedigree": pedigree_scores.get(team),
             "seeded":   seeded,
         }
 
-        blend_weights = {k: _W[k] for k in ["fifa", "elo", "form", "pedigree", "seeded"]}
+        blend_weights = {k: _W[k] for k in ["fifa", "elo", "form", "market", "pedigree", "seeded"]}
 
         base_score, used_vals, sources_used = _blend(components, blend_weights, seeded)
 
-        # Host component: additive flat boost, scaled by its weight
-        host_val = (HOST_BOOST / 100.0 * 100.0) if is_host else 0.0
-
-        # Final = base weighted on 0.95 of total weight + host on 0.05
-        final = float(np.clip(base_score * 0.95 + host_val * _W["host"], 0.0, 100.0))
-
-        # More intuitive: just add the host boost directly (same as before)
+        # Host boost applied additively (host has its own weight slot in _W)
         final = float(np.clip(base_score + (HOST_BOOST if is_host else 0.0), 0.0, 100.0))
 
         ratings[team] = final
 
         explanation_parts = []
-        if "fifa" in sources_used:
-            explanation_parts.append(f"FIFA={used_vals['fifa']:.1f}")
-        if "elo" in sources_used:
-            explanation_parts.append(f"Elo={used_vals['elo']:.1f}")
-        if "form" in sources_used:
-            explanation_parts.append(f"form={used_vals['form']:.1f}")
-        if "pedigree" in sources_used:
-            explanation_parts.append(f"pedigree={used_vals['pedigree']:.1f}")
-        if is_host:
-            explanation_parts.append(f"host+{HOST_BOOST}")
+        if "fifa"     in sources_used: explanation_parts.append(f"FIFA={used_vals['fifa']:.1f}")
+        if "elo"      in sources_used: explanation_parts.append(f"Elo={used_vals['elo']:.1f}")
+        if "form"     in sources_used: explanation_parts.append(f"form={used_vals['form']:.1f}")
+        if "market"   in sources_used: explanation_parts.append(f"market={used_vals['market']:.1f}")
+        if "pedigree" in sources_used: explanation_parts.append(f"pedigree={used_vals['pedigree']:.1f}")
+        if is_host:                    explanation_parts.append(f"host+{HOST_BOOST}")
 
         rows.append({
-            "team":                        team,
-            "final_rating":                round(final, 2),
-            "fifa_component":              used_vals.get("fifa"),
-            "elo_component":               used_vals.get("elo"),
-            "form_component":              used_vals.get("form"),
+            "team":                          team,
+            "final_rating":                  round(final, 2),
+            "fifa_component":                used_vals.get("fifa"),
+            "elo_component":                 used_vals.get("elo"),
+            "form_component":                used_vals.get("form"),
+            "market_component":              used_vals.get("market"),
             "tournament_pedigree_component": used_vals.get("pedigree"),
-            "seeded_component":            seeded,
-            "host_component":              HOST_BOOST if is_host else 0.0,
-            "sources_used":                ",".join(sources_used),
-            "rating_explanation":          " | ".join(explanation_parts),
+            "seeded_component":              seeded,
+            "host_component":                HOST_BOOST if is_host else 0.0,
+            "sources_used":                  ",".join(sources_used),
+            "rating_explanation":            " | ".join(explanation_parts),
         })
 
     details_df = pd.DataFrame(rows).sort_values("final_rating", ascending=False).reset_index(drop=True)

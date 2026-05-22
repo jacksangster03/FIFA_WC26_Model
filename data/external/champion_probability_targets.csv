@@ -1,0 +1,11 @@
+team,target_low_pct,target_mid_pct,target_high_pct,source_note
+Spain,14,15.8,17,Opta/market calibration
+France,13,15.5,18,Opta/market calibration
+England,9,10.8,12,Opta/market calibration
+Argentina,9,10.3,12,Opta/market calibration
+Brazil,7,8.5,10,Opta/market calibration
+Portugal,5,6.8,8,Opta/market calibration
+Germany,5,6.2,8,Opta/market calibration
+Netherlands,3,4.0,5,Opta/market calibration
+Belgium,2,3.0,4,Opta/market calibration
+Uruguay,2,3.0,4,Opta/market calibration

@@ -1,8 +1,8 @@
 team,adjustment,reason
-Spain,1.5,"Modern tournament strength, elite midfield depth and strong recent international performance"
-France,0.5,Elite squad depth and high knockout ceiling
-England,0.5,Elite squad depth and high FIFA/Elo strength
-Argentina,0.5,Recent tournament success and elite knockout profile
-Brazil,0.0,Elite talent but no manual adjustment needed
-Germany,0.5,Strong tournament pedigree and excellent recent form
-Portugal,0.5,Elite squad quality and strong current rating profile
+Spain,2.0,"Market/Opta calibration: Spain should be close to France and above Argentina based on current priors"
+France,-1.5,Reduce excessive concentration while keeping France among the top favourites
+Argentina,-2.0,Reduce excessive title probability caused by pedigree and recent-success stacking
+England,0.5,Keep England in leading contender band
+Brazil,0.5,Maintain elite upside
+Germany,-1.0,Reduce overconcentration relative to market/Opta range
+Portugal,2.0,Raise Portugal toward second-tier contender band

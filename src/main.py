@@ -126,6 +126,14 @@ def run_pipeline(
     knockout_predictions = simulate_knockout_bracket(knockout_slots, qualifiers, ratings)
     bracket_summary      = build_bracket_summary(knockout_predictions)
 
+    # 5b. Bracket path + xG calibration diagnostics
+    try:
+        from src.bracket_difficulty import generate_bracket_diagnostics, generate_xg_diagnostics
+        generate_bracket_diagnostics(knockout_predictions, ratings)
+        generate_xg_diagnostics(ratings)
+    except Exception as _bde:
+        print(f"[main] WARN: bracket diagnostics failed: {_bde}")
+
     # 6. Manual overrides
     print("\n--- [6/9] Applying manual overrides ---")
     overrides            = load_overrides()

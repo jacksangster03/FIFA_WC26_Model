@@ -70,9 +70,12 @@ def _style(team: str) -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 def _fingerprint(home_team: str, away_team: str, stage: str, salt: str = "") -> float:
-    """Returns a value in [-0.4, +0.4] unique to this match."""
+    """
+    Returns a value in [-0.8, +0.8] unique to this match.
+    Uses 17 distinct steps for wider distribution spread.
+    """
     h = hash((home_team, away_team, stage, salt))
-    return ((h % 9) - 4) * 0.1   # -0.4 … -0.3 … 0 … +0.3 … +0.4
+    return ((h % 17) - 8) * 0.1   # -0.8 … 0 … +0.8  (17 steps)
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +147,10 @@ def predict_corners(
     tempo_adj = ((hs["tempo"] - 1.0)           + (as_["tempo"] - 1.0))           * 0.15
     corners += spt_adj + tempo_adj
 
-    # Match fingerprint for deterministic variation
+    # Primary match fingerprint for deterministic variation
     corners += _fingerprint(home_team, away_team, stage, "corners")
+    # Secondary fingerprint (different salt) adds finer variation
+    corners += _fingerprint(away_team, home_team, stage, "corners2") * 0.4
 
     return int(max(6, min(14, round(corners))))
 
@@ -224,8 +229,10 @@ def predict_yellow_cards(
     style_adj += ((hs["discipline_risk"] - 1.0) + (as_["discipline_risk"] - 1.0)) * 0.18
     yellows += style_adj
 
-    # Match fingerprint
+    # Primary match fingerprint
     yellows += _fingerprint(home_team, away_team, stage, "yellows")
+    # Secondary fingerprint adds finer spread
+    yellows += _fingerprint(away_team, home_team, stage, "yellows2") * 0.35
 
     return int(max(1, min(8, round(yellows))))
 

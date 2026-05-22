@@ -457,6 +457,86 @@ def check_rating_sanity(ratings: Optional[dict] = None) -> tuple[list, list]:
 
 
 # ---------------------------------------------------------------------------
+# Calibration report (soft warnings only, never fails pipeline)
+# ---------------------------------------------------------------------------
+
+def check_calibration() -> list[str]:
+    """
+    Reads simulation_summary.csv and champion_probability_targets.csv.
+    Returns a list of calibration warning strings.  Never errors or fails.
+    Warnings only; calibration issues are flagged, not fatal.
+    """
+    from src.config import OUTPUT_FILES, EXTERNAL_DIR
+    lines: list[str] = []
+
+    sim_path    = OUTPUT_FILES["simulation_summary"]
+    target_path = EXTERNAL_DIR / "champion_probability_targets.csv"
+
+    if not sim_path.exists():
+        lines.append("CALIBRATION: No simulation_summary.csv found; run --sim to generate")
+        return lines
+
+    try:
+        sim_df = pd.read_csv(sim_path)
+        sim_df = sim_df[sim_df["team"] != "_META_n_sims"]
+        sim_map = dict(zip(sim_df["team"], sim_df["champion_prob_pct"].astype(float)))
+    except Exception as exc:
+        lines.append(f"CALIBRATION: Could not read simulation_summary.csv: {exc}")
+        return lines
+
+    # Absolute calibration checks (no targets file required)
+    total = sum(sim_map.values())
+    top2  = sorted(sim_map.values(), reverse=True)[:2]
+    top2_combined = sum(top2)
+
+    if total > 0:
+        france_pct   = sim_map.get("France",    0.0)
+        arg_pct      = sim_map.get("Argentina", 0.0)
+        spain_pct    = sim_map.get("Spain",     0.0)
+        portugal_pct = sim_map.get("Portugal",  0.0)
+        germany_pct  = sim_map.get("Germany",   0.0)
+
+        if france_pct > 20:
+            lines.append(f"CALIBRATION WARN: France {france_pct:.1f}% > 20% target ceiling")
+        if arg_pct > 15:
+            lines.append(f"CALIBRATION WARN: Argentina {arg_pct:.1f}% > 15% target ceiling")
+        if spain_pct < 12:
+            lines.append(f"CALIBRATION WARN: Spain {spain_pct:.1f}% < 12% target floor")
+        if portugal_pct < 4:
+            lines.append(f"CALIBRATION WARN: Portugal {portugal_pct:.1f}% < 4% target floor")
+        if germany_pct > 9:
+            lines.append(f"CALIBRATION WARN: Germany {germany_pct:.1f}% > 9% target ceiling")
+        if top2_combined > 35:
+            lines.append(f"CALIBRATION WARN: Top-2 combined {top2_combined:.1f}% > 35% (over-concentration)")
+
+    # Target-band checks if file available
+    if target_path.exists():
+        try:
+            targets = pd.read_csv(target_path)
+            for _, row in targets.iterrows():
+                team = str(row["team"])
+                lo   = float(row["target_low_pct"])
+                hi   = float(row["target_high_pct"])
+                mid  = float(row["target_mid_pct"])
+                pct  = sim_map.get(team, None)
+                if pct is None:
+                    continue
+                deviation = abs(pct - mid)
+                if deviation > 2.0 and not (lo <= pct <= hi):
+                    lines.append(
+                        f"CALIBRATION WARN: {team} {pct:.1f}% outside target band "
+                        f"[{lo}-{hi}%] (mid={mid}%, dev={deviation:.1f}pp)"
+                    )
+        except Exception:
+            pass
+
+    if not lines:
+        lines.append("CALIBRATION: All champion probabilities within target bands")
+
+    return lines
+
+
+# ---------------------------------------------------------------------------
 # Top-level runner
 # ---------------------------------------------------------------------------
 
@@ -477,6 +557,7 @@ def run_all_checks(
     ph_errors, ph_warnings = check_placeholder_leakage(group_preds, group_tables, knockout_preds)
     rs_errors, rs_warnings = check_rating_sanity(ratings)
     diag_lines             = realism_diagnostics(group_preds, knockout_preds, full_ko_preds, ratings)
+    calib_lines            = check_calibration()
 
     all_errors = g_errors + k_errors + ph_errors
 
@@ -514,6 +595,10 @@ def run_all_checks(
     for line in diag_lines:
         print("  " + line)
 
+    print("\nCalibration report:")
+    for line in calib_lines:
+        print("  " + line)
+
     # Write report
     out_path = OUTPUT_FILES["quality_checks"]
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -541,6 +626,7 @@ def run_all_checks(
     for msg in rs_errors + rs_warnings:
         report_lines.append(msg + "\n")
     report_lines.append("\n" + "\n".join(diag_lines) + "\n")
+    report_lines.append("\nCalibration Report:\n" + "\n".join(calib_lines) + "\n")
     out_path.write_text("".join(report_lines))
 
     print(f"\n[quality_checks] Report written -> {out_path}")

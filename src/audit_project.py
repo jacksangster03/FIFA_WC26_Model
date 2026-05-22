@@ -114,6 +114,7 @@ def audit_ratings() -> int:
 
     # Component columns present
     for col in ("fifa_component", "elo_component", "form_component",
+                "market_component",
                 "tournament_pedigree_component", "sources_used", "rating_explanation"):
         ok = col in df.columns
         if not _check(f"Column '{col}' present in team_ratings_final", ok):

@@ -166,13 +166,29 @@ def run_pipeline(
     )
 
     # 9. Optional simulation + post-run sanity check
+    advancement_df: pd.DataFrame | None = None
     if run_sim:
         print(f"\n--- [9/9] Monte Carlo simulation ({n_sims:,} runs) ---")
         from src.simulation import run_simulation
         sim_df = run_simulation(group_fixtures, knockout_slots, ratings, n=n_sims)
         _sanity_check_champion(knockout_predictions, sim_df)
+        adv_path = OUTPUTS_DIR / "simulation_advancement_summary.csv"
+        if adv_path.exists():
+            advancement_df = pd.read_csv(adv_path)
     else:
         print("\n--- [9/9] Simulation skipped (pass --sim to enable) ---")
+
+    # 9b. Expected-points diagnostics (lightweight, always run)
+    try:
+        from src.expected_points import run_expected_points_diagnostics
+        run_expected_points_diagnostics(
+            group_predictions[_GROUP_OUTPUT_COLS],
+            knockout_predictions[_KNOCKOUT_OUTPUT_COLS],
+            ratings,
+            advancement_df,
+        )
+    except Exception as _epe:
+        print(f"[main] WARN: expected-points diagnostics failed: {_epe}")
 
     print("\n" + "=" * 60)
     print(f"Pipeline complete. Outputs saved to: {OUTPUTS_DIR}")

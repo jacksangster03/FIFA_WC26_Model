@@ -1,8 +1,8 @@
 team,adjustment,reason
-Spain,2.0,"Market/Opta calibration: Spain should be close to France and above Argentina based on current priors"
+Spain,2.5,"Market/Opta calibration: Spain should be close to France based on current priors; raised to cap to close gap"
 France,-1.5,Reduce excessive concentration while keeping France among the top favourites
-Argentina,-2.0,Reduce excessive title probability caused by pedigree and recent-success stacking
-England,0.5,Keep England in leading contender band
-Brazil,0.5,Maintain elite upside
+Argentina,-1.5,"Reduce pedigree stacking; partial relief to bring Argentina closer to 9-12% simulation band"
+England,0.8,Raise England slightly to bring into 9-12% simulation target band
+Brazil,1.0,Raise Brazil slightly to support 7-10% simulation target band
 Germany,-1.0,Reduce overconcentration relative to market/Opta range
 Portugal,2.0,Raise Portugal toward second-tier contender band

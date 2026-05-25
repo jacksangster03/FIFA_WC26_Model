@@ -3,8 +3,8 @@ match_id,round,multiplier,date_utc,venue,slot_home,slot_away
 74,Round of 32,1,2026-06-29T17:00:00Z,"NRG Stadium, Houston",Winner Group C,Runner-up Group F
 75,Round of 32,1,2026-06-29T20:30:00Z,"Gillette Stadium, Boston",Winner Group E,Best 3rd (Groups A/B/C/D/F)
 76,Round of 32,1,2026-06-30T01:00:00Z,"Estadio BBVA, Monterrey",Winner Group F,Runner-up Group C
-77,Round of 32,1,2026-06-30T17:00:00Z,"AT&T Stadium, Dallas",Runner-up Group E,Runner-up Group I
-78,Round of 32,1,2026-06-30T21:00:00Z,"MetLife Stadium, East Rutherford",Winner Group I,Best 3rd (Groups C/D/F/G/H)
+77,Round of 32,1,2026-06-30T17:00:00Z,"AT&T Stadium, Dallas",Runner-up Group E,Winner Group I
+78,Round of 32,1,2026-06-30T21:00:00Z,"MetLife Stadium, East Rutherford",Runner-up Group I,Best 3rd (Groups C/D/F/G/H)
 79,Round of 32,1,2026-07-01T01:00:00Z,"Estadio Azteca, Mexico City",Winner Group A,Best 3rd (Groups C/E/F/H/I)
 80,Round of 32,1,2026-07-01T16:00:00Z,"Mercedes-Benz Stadium, Atlanta",Winner Group L,Best 3rd (Groups E/H/I/J/K)
 81,Round of 32,1,2026-07-01T20:00:00Z,"Lumen Field, Seattle",Winner Group G,Best 3rd (Groups A/E/H/I/J)

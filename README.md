@@ -1,6 +1,10 @@
 # FIFA World Cup 2026 Prediction Model
 
-A modular ML and simulation pipeline for the DataCamp FIFA WC 2026 Prediction Competition. Covers all 72 group-stage and 32 knockout matches, including resolved playoff teams.
+A rating-blend, Poisson goal model and Monte Carlo pipeline built for the DataCamp FIFA WC 2026 Prediction Competition. It produces scoreline, cards and corners predictions for all 72 group-stage and 32 knockout matches, including resolved playoff teams.
+
+**How it predicts.** Team ratings are a weighted blend of FIFA points, World Elo, recent form, tournament pedigree and a manual prior. Ratings feed an expected-goals model with Poisson scorelines (`scipy.stats.poisson`), the submitted scoreline is the most likely one conditional on the predicted outcome (conditional argmax of the joint Poisson matrix), and an expected-points diagnostic scores the predictions under the competition rules. Monte Carlo simulation gives champion probabilities. It does not train a supervised machine-learning model; `scikit-learn` appears in `requirements.txt` but is not imported by the code.
+
+**Status.** Snapshot of the pre-tournament submission (last commit 25 May 2026). The repository does not contain an evaluation of the predictions against actual results, so it makes no accuracy claim.
 
 ## Quick start
 
